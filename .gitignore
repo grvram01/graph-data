@@ -1,0 +1,12 @@
+node_modules
+.DS_Store
+
+# Build Output
+dist
+lib/
+
+# CDK Output
+cdk.out
+
+# Environment Variables
+.env
