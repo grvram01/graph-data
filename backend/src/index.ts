@@ -17,7 +17,6 @@ const sampleData = {
 // Neptune connection
 const createGremlinClient = () => {
   const neptuneEndpoint = process.env.NEPTUNE_ENDPOINT || '';
-  console.log("neptuneEndpoint ----------->", neptuneEndpoint)
   const neptunePort = process.env.NEPTUNE_PORT || NEPTUNE_PORT_FALLBACK;
   return new driver.Client(
     `wss://${neptuneEndpoint}:${neptunePort}/gremlin`,
@@ -34,15 +33,23 @@ let isInitialized = false;
 
 // Initialize Neptune with sample data
 const initializeNeptune = async () => {
-  console.log('initializeNeptune started....')
   if (isInitialized) return;
   const client = createGremlinClient();
-  console.log("client created..........")
   try {
+    console.log('inside try......')
     await client.open();
     // Check if data already exists
     const result = await client.submit('g.V().count()');
     console.log('result is.............', JSON.stringify(result))
+  //   {
+  //     "_items": [
+  //         0
+  //     ],
+  //     "attributes": {
+  //         "host": "/10.0.1.132:5987"
+  //     },
+  //     "length": 1
+  // }
     const count = result._items[0];
     if (count > 0) {
       console.log('Data already exists, skipping initialization');
@@ -171,7 +178,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
       case '/api/health':
         console.log('hitting health...................')
-        // await initializeNeptune();
+        await initializeNeptune();
+        console.log('after health...................')
         return {
           statusCode: 200,
           body: JSON.stringify({ status: 'ok' })

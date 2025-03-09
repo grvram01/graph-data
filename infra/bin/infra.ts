@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib';
-import { InfraStackBE } from '../lib/infra-stack-be';
+import { InfraStack } from '../lib/infra-stack-be';
 
 const app = new cdk.App();
-new InfraStackBE(app, 'InfraStackBE', {
+new InfraStack(app, 'InfraStack', {
   env: { 
     account: process.env.CDK_DEFAULT_ACCOUNT, 
     region: process.env.CDK_DEFAULT_REGION || 'eu-west-1' 
