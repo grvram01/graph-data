@@ -142,15 +142,16 @@ const getGraphData = async () => {
 };
 
 // Lambda initialization function
-const lambdaInit = async () => {
-  // Perform one-time initialization when Lambda container starts
-  await initializeNeptune();
-};
+// const lambdaInit = async () => {
+//   // Perform one-time initialization when Lambda container starts
 
-// Invoke initialization when the module is loaded
-lambdaInit().catch(err => {
-  console.error('Initialization failed:', err);
-});
+//   // await initializeNeptune();
+// };
+
+// // Invoke initialization when the module is loaded
+// lambdaInit().catch(err => {
+//   console.error('Initialization failed:', err);
+// });
 
 // Lambda handler
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
@@ -169,6 +170,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         };
 
       case '/api/health':
+        console.log('hitting health...................')
+        // await initializeNeptune();
         return {
           statusCode: 200,
           body: JSON.stringify({ status: 'ok' })
