@@ -182,7 +182,14 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         console.log('after health...................')
         return {
           statusCode: 200,
-          body: JSON.stringify({ status: 'ok' })
+          body: JSON.stringify({ status: 'ok' }),
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*', // Allow all origins or specify your S3 website URL
+            'Access-Control-Allow-Methods': 'GET,OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type'
+          },
+
         };
 
       default:
