@@ -13,7 +13,6 @@ const sampleData = {
     { name: "B-3", description: "This is description B-3", parent: "B" }
   ]
 };
-
 // Neptune connection
 const createGremlinClient = () => {
   const neptuneEndpoint = process.env.NEPTUNE_ENDPOINT || '';
@@ -31,6 +30,26 @@ const createGremlinClient = () => {
 // Use a global variable to track initialization status
 let isNeptuneInitialized = false;
 
+// Add a function to clear the database
+const clearNeptuneDatabase = async (): Promise<void> => {
+  console.log('Clearing Neptune database...');
+  let client = null;
+  try {
+    client = createGremlinClient();
+    await client.open();
+    // Drop all vertices and edges
+    await client.submit('g.V().drop()');
+    console.log('Database cleared successfully');
+  } catch (error) {
+    console.error('Error clearing Neptune database:', error);
+    throw error;
+  } finally {
+    if (client) {
+      await client.close();
+    }
+  }
+};
+
 const initializeNeptune = async (): Promise<void> => {
   console.log('inside initializeNeptune......')
   // If already initialized, skip
@@ -38,20 +57,22 @@ const initializeNeptune = async (): Promise<void> => {
     console.log('already initialised.....')
     return
   };
-
-  console.log('Checking Neptune initialization status...');
   let client = null;
   try {
     client = createGremlinClient();
-    console.log("Created Gremlin client");
     await client.open();
-    
+
     // Check if data already exists - with timeout protection
     let result;
     try {
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Query timeout')), 5000)
       );
+      // Always clear the database before initialization
+      // This ensures old data is removed when new data is added
+      if (!isNeptuneInitialized) {
+        await clearNeptuneDatabase();
+      }
       result = await Promise.race([
         client.submit('g.V().count()'),
         timeoutPromise
@@ -60,18 +81,6 @@ const initializeNeptune = async (): Promise<void> => {
       console.error('Error querying Neptune:', error);
       throw error;
     }
-    
-    console.log('Count query result:', JSON.stringify(result));
-    const count = result._items[0];
-    
-    if (count > 0) {
-      console.log(`${count} vertices found, skipping initialization`);
-      isNeptuneInitialized = true;
-      return;
-    }
-    
-    console.log('No data found. Initializing Neptune with sample data...');
-    
     // Create nodes sequentially with async/await
     for (const node of sampleData.data) {
       try {
@@ -80,7 +89,6 @@ const initializeNeptune = async (): Promise<void> => {
            .property('name', '${node.name}')
            .property('description', '${node.description}')`
         );
-        console.log(`Added node: ${node.name}`);
       } catch (error) {
         console.error(`Error adding node ${node.name}:`, error);
         throw error;
@@ -102,8 +110,7 @@ const initializeNeptune = async (): Promise<void> => {
         throw error;
       }
     }
-    
-    console.log('Neptune initialization complete');
+    // Neptune initialization complete
     isNeptuneInitialized = true;
   } catch (err) {
     // More detailed error logging
@@ -132,7 +139,9 @@ const initializeNeptune = async (): Promise<void> => {
 // Get graph data
 const getGraphData = async () => {
   // Ensure Neptune is initialized before fetching data
+  console.log("inside getGraphData")
   if (!isNeptuneInitialized && process.env.NEPTUNE_ENDPOINT) {
+    console.log('about to initialise...')
     await initializeNeptune();
   }
 
@@ -151,6 +160,7 @@ const getGraphData = async () => {
     // Create map of all nodes
     nodes.forEach((node: any) => {
       nodesMap.set(node.name, {
+        id: node.name,
         name: node.name,
         description: node.description,
         parent: '',
@@ -165,9 +175,20 @@ const getGraphData = async () => {
        .by(outV().values('name'))
        .by(inV().values('name'))`
     );
+    // Track edges that have been processed to avoid duplicates
+    const processedEdges = new Set();
 
     // Establish parent-child relationships
     edgesResult._items.forEach((edge: any) => {
+      // Create a unique edge identifier
+      const edgeKey = `${edge.parent}->${edge.child}`;
+
+      // Skip if this edge has already been processed
+      if (processedEdges.has(edgeKey)) {
+        return;
+      }
+      processedEdges.add(edgeKey);
+
       const childNode = nodesMap.get(edge.child);
       const parentNode = nodesMap.get(edge.parent);
 
@@ -176,10 +197,27 @@ const getGraphData = async () => {
         parentNode.children.push(childNode);
       }
     });
-
+    console.log("nodesMap.values()--> ", JSON.stringify(nodesMap.values()))
     // Find root nodes
-    const rootNodes = Array.from(nodesMap.values())
+    // const rootNodes = Array.from(nodesMap.values())
+    //   .filter(node => !node.parent);
+    let rootNodes = Array.from(nodesMap.values())
       .filter(node => !node.parent);
+
+    // Deduplicate children arrays
+    const deduplicateChildren = (node: any) => {
+      // Create a Set of child IDs to track which children we've processed
+      const childIDs = new Set();
+      node.children = node.children.filter((child: any) => {
+        if (childIDs.has(child.id)) return false;
+        childIDs.add(child.id);
+        return true;
+      });
+
+      // Process children recursively
+      node.children.forEach(deduplicateChildren);
+    };
+    rootNodes.forEach(deduplicateChildren);
 
     return rootNodes;
   } catch (err) {
@@ -196,8 +234,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     // Determine the route based on the path
     switch (event.path) {
       case '/api/graph':
-        console.log('calling graph........');
         const data = await getGraphData();
+        console.log("data from be -->", JSON.stringify(data))
         return {
           statusCode: 200,
           headers: {
@@ -208,7 +246,6 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         };
 
       case '/api/health':
-        console.log('calling health...................')
         return {
           statusCode: 200,
           body: JSON.stringify({ status: 'ok' }),

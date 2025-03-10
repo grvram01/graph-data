@@ -5,11 +5,6 @@
     </header>
     <main>
       <div class="info-panel">
-
-        <!-- <button @click="checkHealth" :disabled="healthLoading">
-          {{ healthLoading ? 'Checking...' : 'Check API Health' }}
-        </button> -->
-
         <div v-if="apiStatus" class="status-box" :class="{ 'status-ok': apiStatus === 'ok' }">
           API Status: {{ apiStatus }}
         </div>
@@ -40,8 +35,6 @@
 import { defineComponent, ref, onMounted, onUnmounted } from 'vue';
 import * as d3 from 'd3';
 
-import { HierarchyPointLink, HierarchyPointNode } from 'd3';
-
 interface GraphNode {
   id: string;
   name: string;
@@ -51,6 +44,8 @@ interface GraphNode {
   x?: number;
   y?: number;
 }
+
+type StratifyNode = GraphNode & { name: string, parent: string }
 
 interface GraphLink {
   source: string | GraphNode;
@@ -178,11 +173,9 @@ export default defineComponent({
         const { data } = await response.json();
         console.log('Graph data response:', data);
         const graphData = prepareGraphData(data);
-
         // Ensure the SVG is initialized before rendering
         initializeSVG();
         renderHierarchicalGraph(graphData);
-        console.log('success......')
       } catch (apiError) {
         console.error('API Error:', apiError);
         error.value = 'Could not fetch data from API. Using sample data instead.';
@@ -213,85 +206,66 @@ export default defineComponent({
 
     // New render function for hierarchical layout
     const renderHierarchicalGraph = (graphData: GraphData): void => {
-      // Ensure SVG is initialized
-      if (!svg) {
-        console.error('SVG not initialized');
-        return;
-      }
+      // Ensure SVG is initialized and clear it
+      if (!svg) return console.error('SVG not initialized');
+      svg.selectAll("*").remove();
 
-      const nodeMap = new Map<string, GraphNode>();
-      graphData.nodes.forEach(node => nodeMap.set(node.id, node));
-      // Node dimensions
+      // Node dimensions and margins
       const nodeWidth = 100;
       const nodeHeight = 50;
+      const margin = { top: 40, right: 120, bottom: 40, left: 120 };
+      const width = 800;
+      const height = 600;
 
-      // Create a tree layout
-      const treeLayout = d3.tree<GraphNode>().size([400, 500]);
-      const horizontalMargin = 100; // Added margin to prevent left overflow
-      // Create a hierarchical root
-      const rootNode = graphData.nodes.find(n => !n.parent);
-      if (!rootNode) {
-        console.error('No root node found');
-        return;
+      // Transform flat data to nested hierarchy
+      function buildNestedData(nodes: any) {
+        // Find the root node
+        const rootNode = nodes.find((node: any) => !node.parent);
+        if (!rootNode) return null;
+
+        // Recursive function to build the tree
+        const buildTree = (parentName: string) => {
+          const children = nodes
+            .filter((node: { parent: string }) => node.parent === parentName)
+            .map((node: { name: string, description: string, id: string, children: any }) => ({
+              name: node.name,
+              description: node.description,
+              id: node.id || node.name,
+              children: buildTree(node.name)
+            }));
+
+          return children.length ? children : undefined;
+        }
+
+        // Build the complete hierarchy
+        return {
+          name: rootNode.name,
+          description: rootNode.description,
+          id: rootNode.id || rootNode.name,
+          children: buildTree(rootNode.name)
+        };
       }
 
-      const hierarchyData = {
-        name: rootNode.name,
-        children: graphData.nodes
-          .filter(n => n.parent === rootNode.name)
-          .map(child => ({
-            name: child.name,
-            description: child.description,
-            children: graphData.nodes.filter(n => n.parent === child.name)
-          }))
-      };
-      const root = d3.hierarchy<any>(hierarchyData, d => d.children)
+      // Create hierarchy directly from nested data
+      const nestedData = buildNestedData(graphData.nodes);
+      const root = d3.hierarchy(nestedData);
 
-      // Apply the tree layout
-      const treeData = treeLayout(root);
+      // Set up tree layout with fixed dimensions
+      const tree = d3.tree()
+        .size([height - margin.top - margin.bottom, width - margin.left - margin.right]);
 
-      // Draw nodes as rectangles
-      const nodes = svg
-        .append('g')
-        .attr('transform', `translate(${horizontalMargin}, 0)`)
-        .attr('class', 'nodes')
-        .selectAll('rect')
-        .data(treeData.descendants())
-        .enter()
-        .append('rect')
-        .attr('width', nodeWidth)
-        .attr('height', nodeHeight)
-        .attr('x', d => (d.y || 0) - nodeWidth / 2)
-        .attr('y', d => (d.x || 0) - nodeHeight / 2)
-        .attr('rx', 5)
-        .attr('ry', 5)
-        .attr('fill', d => colorByDepth(d.depth))
-        .attr('stroke', '#fff')
-        .attr('stroke-width', 2)
-        .on('click', (event, d) => {
-          // Show popup with node details
-          selectedNode.value = {
-            name: d.data.name,
-            description: d.data.description,
-            parent: '',
-            id: d.data.name,
-            depth: d.depth
-          };
-          // selectedNode.value = d.data;
-          showPopup.value = true;
+      // Apply layout
+      tree(root as unknown as any);
 
-          // Position popup near the clicked node
-          popupStyle.value = {
-            top: `${(d.x || 0) - nodeHeight / 2 + 10}px`,
-            left: `${(d.y || 0) + nodeHeight / 2 + 10}px`
-          };
-        });
+      // Create an SVG group with margins applied
+      const g = svg.append("g")
+        .attr("transform", `translate(${margin.left},${margin.top})`);
 
-      // Add arrowhead marker
+      // Add arrowhead marker definition
       svg.append('defs').append('marker')
         .attr('id', 'arrowhead')
         .attr('viewBox', '0 -5 10 10')
-        .attr('refX', nodeWidth / 2 + 15)
+        .attr('refX', -5)
         .attr('refY', 0)
         .attr('orient', 'auto')
         .attr('markerWidth', 6)
@@ -300,45 +274,119 @@ export default defineComponent({
         .attr('d', 'M0,-5L10,0L0,5')
         .attr('fill', '#999');
 
-      // Draw links
-      const links = svg.append('g')
-        .attr('transform', `translate(${horizontalMargin}, 0)`)
-        .attr('class', 'links')
-        .selectAll('path')
-        .data(treeData.links())
-        .enter()
-        .append('path')
-        .attr('d', (linkData: d3.HierarchyPointLink<GraphNode>) => {
-          const sourceX = linkData.source.y ?? 0;
-          const sourceY = linkData.source.x ?? 0;
-          const targetX = linkData.target.y ?? 0;
-          const targetY = linkData.target.x ?? 0;
+      // Handle special case for root connections
+      const children = root.children || [];
 
-          return `M${sourceX},${sourceY}C${(sourceX + targetX) / 2},${sourceY} ${(sourceX + targetX) / 2},${targetY} ${targetX},${targetY}`;
+      if (root && children.length > 0) {
+        // Create vertical connector
+        const rootX = root.y || 0;
+        const rootY = root.x || 0;
+        const verticalLineX = rootX + 50;
+        const minY = Math.min(...children.map(d => d.x || 0));
+        const maxY = Math.max(...children.map(d => d.x || 0));
+
+        // Draw vertical connector
+        g.append('line')
+          .attr('x1', verticalLineX)
+          .attr('y1', minY)
+          .attr('x2', verticalLineX)
+          .attr('y2', maxY)
+          .attr('stroke', '#999')
+          .attr('stroke-width', 2);
+
+        // Draw root to vertical line
+        g.append('path')
+          .attr('d', `M${rootX},${rootY}L${verticalLineX},${rootY}`)
+          .attr('stroke', '#999')
+          .attr('stroke-width', 2)
+          .attr('fill', 'none');
+
+        // Draw connector lines to children
+        g.selectAll('.child-link')
+          .data(children)
+          .join('path')
+          .attr('class', 'child-link')
+          .attr('d', d => {
+            const childX = d.x || 0;
+            const childY = d.y || 0;
+            const nodeLeftEdge = childY - nodeWidth / 2;
+            const gapBeforeNode = 10;
+            return `M${verticalLineX},${childX}L${nodeLeftEdge - gapBeforeNode},${childX}`;
+          })
+          .attr('stroke', '#999')
+          .attr('stroke-width', 2)
+          .attr('fill', 'none')
+          .attr('marker-end', 'url(#arrowhead)');
+      }
+
+      // Draw links between lower levels (not from root)
+      g.append("g")
+        .selectAll("path")
+        .data(root.links().filter(d => d.source.depth > 0))
+        .join("path")
+        .attr("d", d => {
+          const nodeGap = 10;
+          // Get coordinates with fallbacks to 0 if undefined
+          const sourceY = d.source.y || 0;
+          const sourceX = d.source.x || 0;
+          const targetY = d.target.y || 0;
+          const targetX = d.target.x || 0;
+          // Calculate end point that stops before the target node
+          const endX = targetY - nodeWidth / 2 - nodeGap;
+          return `M${sourceY},${sourceX}L${endX},${targetX}`;
         })
-        .attr('fill', 'none')
-        .attr('stroke', '#999')
-        .attr('stroke-width', 2)
-        .attr('marker-end', 'url(#arrowhead)');
+        .attr("fill", "none")
+        .attr("stroke", "#999")
+        .attr("stroke-width", 2)
+        .attr("marker-end", "url(#arrowhead)");
+
+      // Draw nodes
+      g.append("g")
+        .selectAll("rect")
+        .data(root.descendants())
+        .join("rect")
+        .attr("x", d => (d.y || 0) - nodeWidth / 2)
+        .attr("y", d => (d.x || 0) - nodeHeight / 2)
+        .attr("width", nodeWidth)
+        .attr("height", nodeHeight)
+        .attr("rx", 5)
+        .attr("ry", 5)
+        .attr("fill", d => colorByDepth(d.depth))
+        .attr("stroke", "#fff")
+        .attr("stroke-width", 2)
+        .on("click", (_event, d) => {
+          let parentName = '';
+          if (d.parent) {
+            parentName = d.parent.data?.name || '';
+          }
+          selectedNode.value = {
+            name: d.data?.name || '',
+            description: d.data?.description || '',
+            parent: parentName,
+            id: d.data?.id || d.data?.name || '',
+            depth: d.depth
+          };
+          showPopup.value = true;
+          popupStyle.value = {
+            top: `${(d.x || 0) - nodeHeight / 2 + 10 + margin.top}px`,
+            left: `${(d.y || 0) + nodeHeight / 2 + 10 + margin.left}px`
+          };
+        });
 
       // Add labels
-      const labels = svg.append('g')
-        .attr('transform', `translate(${horizontalMargin}, 0)`)
-        .attr('class', 'labels')
-        .selectAll('text')
-        .data(treeData.descendants())
-        .enter()
-        .append('text')
-        .attr('x', d => d.y || 0)
-        .attr('y', d => d.x || 0)
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'central')
-        .text(d => d.data.name)
-        .attr('fill', 'white')
-        .attr('font-weight', 'bold')
-        .attr('pointer-events', 'none');
+      g.append("g")
+        .selectAll("text")
+        .data(root.descendants())
+        .join("text")
+        .attr("x", d => d.y || 0)
+        .attr("y", d => d.x || 0)
+        .attr("text-anchor", "middle")
+        .attr("dominant-baseline", "central")
+        .text(d => d.data?.name || '')
+        .attr("fill", "white")
+        .attr("font-weight", "bold")
+        .attr("pointer-events", "none");
     };
-
     // Helper function to generate colors based on node depth
     const colorByDepth = (depth: number): string => {
       const colors = [
