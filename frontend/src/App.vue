@@ -204,149 +204,176 @@ export default defineComponent({
       }
     };
 
-    // New render function for hierarchical layout
-    const renderHierarchicalGraph = (graphData: GraphData): void => {
-      // Ensure SVG is initialized and clear it
-      if (!svg) return console.error('SVG not initialized');
-      svg.selectAll("*").remove();
 
-      // Node dimensions and margins
-      const nodeWidth = 100;
-      const nodeHeight = 50;
-      const margin = { top: 40, right: 120, bottom: 40, left: 120 };
+    const renderHierarchicalGraph = (graphData: GraphData): void => {
+      // Ensure SVG is initialized
+      if (!svg) return console.error('SVG not initialized');
+
+      // Just use the svg selection directly
+      const svgSelection = svg;
+
+      // Clear existing SVG content
+      svgSelection.selectAll("*").remove();
+
+      // Configuration options
       const width = 800;
       const height = 600;
+      const nodeWidth = 100;
+      const nodeHeight = 50;
+      const padding = 1.5;
+      const stroke = "#999";
+      const strokeWidth = 2;
+      const nodeGap = 10;
 
-      // Transform flat data to nested hierarchy
-      function buildNestedData(nodes: any) {
-        // Find the root node
-        const rootNode = nodes.find((node: any) => !node.parent);
-        if (!rootNode) return null;
+      // Convert flat data to hierarchy format expected by Tree function
+      const hierarchyData = {
+        name: "root",
+        children: [] as any[],
+        description: '',
+        id: ''
+      };
 
-        // Recursive function to build the tree
-        const buildTree = (parentName: string) => {
-          const children = nodes
-            .filter((node: { parent: string }) => node.parent === parentName)
-            .map((node: { name: string, description: string, id: string, children: any }) => ({
-              name: node.name,
-              description: node.description,
-              id: node.id || node.name,
-              children: buildTree(node.name)
-            }));
+      // Find root node and build tree
+      const rootNode = graphData.nodes.find(n => !n.parent);
+      if (!rootNode) return console.error('No root node found');
 
-          return children.length ? children : undefined;
-        }
+      // Build hierarchical data structure
+      hierarchyData.name = rootNode.name;
+      hierarchyData.description = rootNode.description;
+      hierarchyData.id = rootNode.id;
 
-        // Build the complete hierarchy
-        return {
-          name: rootNode.name,
-          description: rootNode.description,
-          id: rootNode.id || rootNode.name,
-          children: buildTree(rootNode.name)
-        };
+      // Recursive function to build the tree
+      function buildChildren(parentName: string): any[] {
+        return graphData.nodes
+          .filter(node => node.parent === parentName)
+          .map(node => ({
+            name: node.name,
+            description: node.description,
+            id: node.id,
+            children: buildChildren(node.name)
+          }));
       }
 
-      // Create hierarchy directly from nested data
-      const nestedData = buildNestedData(graphData.nodes);
-      const root = d3.hierarchy(nestedData);
+      hierarchyData.children = buildChildren(rootNode.name);
 
-      // Set up tree layout with fixed dimensions
-      const tree = d3.tree()
-        .size([height - margin.top - margin.bottom, width - margin.left - margin.right]);
+      // Create hierarchy and apply tree layout
+      const root = d3.hierarchy(hierarchyData);
 
-      // Apply layout
-      tree(root as unknown as any);
+      // Compute the layout
+      const dy = width / (root.height + padding);
+      const dx = 40;
 
-      // Create an SVG group with margins applied
-      const g = svg.append("g")
-        .attr("transform", `translate(${margin.left},${margin.top})`);
+      // Use d3.tree layout
+      d3.tree().nodeSize([dx, dy])(root as unknown as any);
 
-      // Add arrowhead marker definition
-      svg.append('defs').append('marker')
+      // Center the tree
+      let x0 = Infinity;
+      let x1 = -x0;
+      root.each(d => {
+        if (d.x != null) {
+          x1 = Math.max(x1, d.x);
+          x0 = Math.min(x0, d.x);
+        }
+      });
+
+      // Apply viewBox and setup
+      svgSelection
+        .attr("viewBox", [-dy * padding / 2, x0 - dx, width, height])
+        .attr("width", width)
+        .attr("height", height);
+
+      // Add arrowhead marker
+      svgSelection
+        .append('defs').append('marker')
         .attr('id', 'arrowhead')
         .attr('viewBox', '0 -5 10 10')
-        .attr('refX', -5)
+        .attr('refX', 8)
         .attr('refY', 0)
         .attr('orient', 'auto')
         .attr('markerWidth', 6)
         .attr('markerHeight', 6)
         .append('path')
         .attr('d', 'M0,-5L10,0L0,5')
-        .attr('fill', '#999');
+        .attr('fill', stroke);
 
-      // Handle special case for root connections
-      const children = root.children || [];
+      // Special case for root node
+      if (root.children && root.children.length > 0) {
+        const rootY = root.y || 0;
+        const rootX = root.x || 0;
+        const verticalX = rootY + 100;
 
-      if (root && children.length > 0) {
+        // Find min and max Y of children
+        const childrenXs = root.children.map(d => d.x || 0);
+        const minX = Math.min(...childrenXs);
+        const maxX = Math.max(...childrenXs);
+
         // Create vertical connector
-        const rootX = root.y || 0;
-        const rootY = root.x || 0;
-        const verticalLineX = rootX + 50;
-        const minY = Math.min(...children.map(d => d.x || 0));
-        const maxY = Math.max(...children.map(d => d.x || 0));
+        svgSelection
+          .append("line")
+          .attr("x1", verticalX)
+          .attr("y1", minX)
+          .attr("x2", verticalX)
+          .attr("y2", maxX)
+          .attr("stroke", stroke)
+          .attr("stroke-width", strokeWidth);
 
-        // Draw vertical connector
-        g.append('line')
-          .attr('x1', verticalLineX)
-          .attr('y1', minY)
-          .attr('x2', verticalLineX)
-          .attr('y2', maxY)
-          .attr('stroke', '#999')
-          .attr('stroke-width', 2);
+        // Create horizontal line from root to vertical
+        svgSelection
+          .append("path")
+          .attr("d", `M${rootY},${rootX}L${verticalX},${rootX}`)
+          .attr("fill", "none")
+          .attr("stroke", stroke)
+          .attr("stroke-width", strokeWidth);
 
-        // Draw root to vertical line
-        g.append('path')
-          .attr('d', `M${rootX},${rootY}L${verticalLineX},${rootY}`)
-          .attr('stroke', '#999')
-          .attr('stroke-width', 2)
-          .attr('fill', 'none');
-
-        // Draw connector lines to children
-        g.selectAll('.child-link')
-          .data(children)
-          .join('path')
-          .attr('class', 'child-link')
-          .attr('d', d => {
-            const childX = d.x || 0;
+        // Create lines from vertical to each child
+        svgSelection
+          .selectAll(".root-child-link")
+          .data(root.children)
+          .join("path")
+          .attr("class", "root-child-link")
+          .attr("d", d => {
             const childY = d.y || 0;
-            const nodeLeftEdge = childY - nodeWidth / 2;
-            const gapBeforeNode = 10;
-            return `M${verticalLineX},${childX}L${nodeLeftEdge - gapBeforeNode},${childX}`;
+            const childX = d.x || 0;
+            const endY = childY - nodeWidth / 2 - nodeGap - 10;
+            return `M${verticalX},${childX}L${endY},${childX}`;
           })
-          .attr('stroke', '#999')
-          .attr('stroke-width', 2)
-          .attr('fill', 'none')
-          .attr('marker-end', 'url(#arrowhead)');
+          .attr("fill", "none")
+          .attr("stroke", stroke)
+          .attr("stroke-width", strokeWidth)
+          .attr("marker-end", "url(#arrowhead)");
       }
 
-      // Draw links between lower levels (not from root)
-      g.append("g")
+      // Draw links between non-root nodes
+      svgSelection
+        .append("g")
+        .attr("fill", "none")
+        .attr("stroke", stroke)
+        .attr("stroke-width", strokeWidth)
         .selectAll("path")
         .data(root.links().filter(d => d.source.depth > 0))
         .join("path")
         .attr("d", d => {
-          const nodeGap = 10;
-          // Get coordinates with fallbacks to 0 if undefined
           const sourceY = d.source.y || 0;
           const sourceX = d.source.x || 0;
           const targetY = d.target.y || 0;
           const targetX = d.target.x || 0;
-          // Calculate end point that stops before the target node
-          const endX = targetY - nodeWidth / 2 - nodeGap;
-          return `M${sourceY},${sourceX}L${endX},${targetX}`;
+          const endY = targetY - nodeWidth / 2 - nodeGap;
+          return `M${sourceY},${sourceX}L${endY},${targetX}`;
         })
-        .attr("fill", "none")
-        .attr("stroke", "#999")
-        .attr("stroke-width", 2)
         .attr("marker-end", "url(#arrowhead)");
 
-      // Draw nodes
-      g.append("g")
-        .selectAll("rect")
+      // Draw nodes as rectangles
+      const node = svgSelection
+        .append("g")
+        .selectAll("g")
         .data(root.descendants())
-        .join("rect")
-        .attr("x", d => (d.y || 0) - nodeWidth / 2)
-        .attr("y", d => (d.x || 0) - nodeHeight / 2)
+        .join("g")
+        .attr("transform", d => `translate(${d.y},${d.x})`);
+
+      // Add rectangles
+      node.append("rect")
+        .attr("x", -nodeWidth / 2)
+        .attr("y", -nodeHeight / 2)
         .attr("width", nodeWidth)
         .attr("height", nodeHeight)
         .attr("rx", 5)
@@ -354,39 +381,38 @@ export default defineComponent({
         .attr("fill", d => colorByDepth(d.depth))
         .attr("stroke", "#fff")
         .attr("stroke-width", 2)
-        .on("click", (_event, d) => {
-          let parentName = '';
+        .on("click", (event, d) => {
+          // Get parent name
+          let parentName = "";
           if (d.parent) {
-            parentName = d.parent.data?.name || '';
+            parentName = d.parent.data.name || "";
           }
+
           selectedNode.value = {
-            name: d.data?.name || '',
-            description: d.data?.description || '',
+            name: d.data.name || "",
+            description: d.data.description || "",
             parent: parentName,
-            id: d.data?.id || d.data?.name || '',
+            id: d.data.id || d.data.name || "",
             depth: d.depth
           };
+
           showPopup.value = true;
           popupStyle.value = {
-            top: `${(d.x || 0) - nodeHeight / 2 + 10 + margin.top}px`,
-            left: `${(d.y || 0) + nodeHeight / 2 + 10 + margin.left}px`
+            top: `${event.pageY}px`,
+            left: `${event.pageX + 10}px`
           };
         });
 
       // Add labels
-      g.append("g")
-        .selectAll("text")
-        .data(root.descendants())
-        .join("text")
-        .attr("x", d => d.y || 0)
-        .attr("y", d => d.x || 0)
+      node.append("text")
+        .attr("dy", "0.32em")
         .attr("text-anchor", "middle")
-        .attr("dominant-baseline", "central")
-        .text(d => d.data?.name || '')
         .attr("fill", "white")
         .attr("font-weight", "bold")
-        .attr("pointer-events", "none");
+        .attr("pointer-events", "none")
+        .text(d => d.data.name);
     };
+
     // Helper function to generate colors based on node depth
     const colorByDepth = (depth: number): string => {
       const colors = [
@@ -402,11 +428,6 @@ export default defineComponent({
     // Load initial graph data
     onMounted(() => {
       fetchGraphData();
-    });
-
-    // Clean up when component is unmounted
-    onUnmounted(() => {
-      // No simulation to stop in this version
     });
 
     return {
