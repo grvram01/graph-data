@@ -28,75 +28,117 @@ const createGremlinClient = () => {
   );
 };
 
-// Initialization flag to ensure one-time initialization
-let isInitialized = false;
+// Use a global variable to track initialization status
+let isNeptuneInitialized = false;
 
-// Initialize Neptune with sample data
-const initializeNeptune = async () => {
-  if (isInitialized) return;
-  const client = createGremlinClient();
+const initializeNeptune = async (): Promise<void> => {
+  console.log('inside initializeNeptune......')
+  // If already initialized, skip
+  if (isNeptuneInitialized) {
+    console.log('already initialised.....')
+    return
+  };
+
+  console.log('Checking Neptune initialization status...');
+  let client = null;
   try {
-    console.log('inside try......')
+    client = createGremlinClient();
+    console.log("Created Gremlin client");
     await client.open();
-    // Check if data already exists
-    const result = await client.submit('g.V().count()');
-    console.log('result is.............', JSON.stringify(result))
-  //   {
-  //     "_items": [
-  //         0
-  //     ],
-  //     "attributes": {
-  //         "host": "/10.0.1.132:5987"
-  //     },
-  //     "length": 1
-  // }
+    
+    // Check if data already exists - with timeout protection
+    let result;
+    try {
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Query timeout')), 5000)
+      );
+      result = await Promise.race([
+        client.submit('g.V().count()'),
+        timeoutPromise
+      ]);
+    } catch (error) {
+      console.error('Error querying Neptune:', error);
+      throw error;
+    }
+    
+    console.log('Count query result:', JSON.stringify(result));
     const count = result._items[0];
+    
     if (count > 0) {
-      console.log('Data already exists, skipping initialization');
-      isInitialized = true;
+      console.log(`${count} vertices found, skipping initialization`);
+      isNeptuneInitialized = true;
       return;
     }
-    console.log('Initializing Neptune with sample data...');
-
-    // Create vertices
+    
+    console.log('No data found. Initializing Neptune with sample data...');
+    
+    // Create nodes sequentially with async/await
     for (const node of sampleData.data) {
-      await client.submit(
-        `g.addV('node')
-         .property('name', '${node.name}')
-         .property('description', '${node.description}')`
-      );
-      console.log(`Added node: ${node.name}`);
+      try {
+        await client.submit(
+          `g.addV('node')
+           .property('name', '${node.name}')
+           .property('description', '${node.description}')`
+        );
+        console.log(`Added node: ${node.name}`);
+      } catch (error) {
+        console.error(`Error adding node ${node.name}:`, error);
+        throw error;
+      }
     }
 
     // Create edges
-    for (const node of sampleData.data) {
-      if (node.parent) {
+    const nodesWithParents = sampleData.data.filter(node => node.parent);
+    for (const node of nodesWithParents) {
+      try {
         await client.submit(
           `g.V().has('node', 'name', '${node.parent}').as('parent')
            .V().has('node', 'name', '${node.name}').as('child')
            .addE('parent_of').from('parent').to('child')`
         );
         console.log(`Added edge from ${node.parent} to ${node.name}`);
+      } catch (error) {
+        console.error(`Error adding edge from ${node.parent} to ${node.name}:`, error);
+        throw error;
       }
     }
-
+    
     console.log('Neptune initialization complete');
-    isInitialized = true;
+    isNeptuneInitialized = true;
   } catch (err) {
-    console.error('Error initializing Neptune:', err);
+    // More detailed error logging
+    if (err instanceof Error) {
+      if (err.message === 'Query timeout') {
+        console.error('Neptune query timed out. Check connectivity and security groups.');
+      } else if (err.name === 'ConnectionError') {
+        console.error('Could not connect to Neptune. Check endpoint and port settings.');
+      } else {
+        console.error('Error initializing Neptune:', err);
+      }
+    }
     throw err;
   } finally {
-    await client.close();
+    // Always close the client connection to prevent leaks
+    if (client) {
+      try {
+        await client.close();
+      } catch (closeErr) {
+        console.error('Error closing Gremlin client:', closeErr);
+      }
+    }
   }
 };
 
 // Get graph data
 const getGraphData = async () => {
-  const client = createGremlinClient();
+  // Ensure Neptune is initialized before fetching data
+  if (!isNeptuneInitialized && process.env.NEPTUNE_ENDPOINT) {
+    await initializeNeptune();
+  }
 
+  const client = createGremlinClient();
   try {
     await client.open();
-
     // Get all vertices
     const verticesResult = await client.submit(
       `g.V().hasLabel('node').project('name', 'description')
@@ -148,48 +190,32 @@ const getGraphData = async () => {
   }
 };
 
-// Lambda initialization function
-// const lambdaInit = async () => {
-//   // Perform one-time initialization when Lambda container starts
-
-//   // await initializeNeptune();
-// };
-
-// // Invoke initialization when the module is loaded
-// lambdaInit().catch(err => {
-//   console.error('Initialization failed:', err);
-// });
-
 // Lambda handler
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   try {
     // Determine the route based on the path
     switch (event.path) {
       case '/api/graph':
+        console.log('calling graph........');
         const data = await getGraphData();
         return {
           statusCode: 200,
           headers: {
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*' // Adjust as needed
+            'Access-Control-Allow-Origin': '*'
           },
           body: JSON.stringify({ data })
         };
 
       case '/api/health':
-        console.log('hitting health...................')
-        await initializeNeptune();
-        console.log('after health...................')
+        console.log('calling health...................')
         return {
           statusCode: 200,
           body: JSON.stringify({ status: 'ok' }),
           headers: {
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*', // Allow all origins or specify your S3 website URL
-            'Access-Control-Allow-Methods': 'GET,OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type'
+            'Access-Control-Allow-Origin': '*'
           },
-
         };
 
       default:
@@ -209,3 +235,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     };
   }
 };
+
+// Perform initialization if endpoint is available
+if (process.env.NEPTUNE_ENDPOINT) {
+  initializeNeptune().catch(err => {
+    console.error('Initialization failed:', err);
+  });
+}
