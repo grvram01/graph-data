@@ -126,7 +126,6 @@ const fetchGraphData = async (): Promise<void> => {
   } catch (apiError) {
     console.error('API Error:', apiError);
     error.value = 'Could not fetch data from API';
-    // Optionally, add fallback to sample data
   } finally {
     loading.value = false;
   }
@@ -146,7 +145,6 @@ const initializeSVG = () => {
       .attr('width', '100%')
       .attr('height', '100%')
       .attr('viewBox', `0 0 ${width} ${height}`)
-      .attr('preserveAspectRatio', 'xMidYMid meet');
   }
 };
 
@@ -227,7 +225,7 @@ const renderHierarchicalGraph = (graphData: GraphData): void => {
     .attr("viewBox", [-dy * padding / 2, x0 - dx, width, height])
     .attr("width", "100%")
     .attr("height", "100%")
-    .attr("preserveAspectRatio", "xMidYMid meet");
+
 
   // Add arrowhead marker
   svgSelection
