@@ -1,38 +1,23 @@
 <template>
-  <div class="container">
-    <header>
-      <h1>Graph Data Visualization</h1>
-    </header>
-    <main>
-      <div class="info-panel">
-        <div v-if="apiStatus" class="status-box" :class="{ 'status-ok': apiStatus === 'ok' }">
-          API Status: {{ apiStatus }}
-        </div>
+  <div>
+    <div ref="graphContainer" class="graph-container"></div>
+    <div v-if="error" class="error">{{ error }}</div>
 
-        <div v-if="error" class="error-box">
-          Error: {{ error }}
-        </div>
-      </div>
-
-      <div class="graph-container" ref="graphContainer"></div>
-
-      <!-- Node popup details -->
-      <div v-if="showPopup" class="node-popup" :style="popupStyle">
-        <div class="popup-header">
-          <h3>{{ selectedNode?.name }}</h3>
-          <button class="close-button" @click="showPopup = false">×</button>
-        </div>
-        <div class="popup-body">
-          <p v-if="selectedNode?.description">{{ selectedNode?.description }}</p>
-          <p v-if="selectedNode?.parent"><strong>Parent:</strong> {{ selectedNode?.parent }}</p>
-        </div>
-      </div>
-    </main>
+    <!-- Node popup -->
+    <div v-if="showPopup" class="node-popup" :style="popupStyle">
+      <h3>{{ selectedNode?.name }}</h3>
+      <p>{{ selectedNode?.description }}</p>
+      <p>Parent: {{ selectedNode?.parent || 'None' }}</p>
+      <button @click="showPopup = false">Close</button>
+    </div>
   </div>
 </template>
 
-<script lang="ts">
-import { defineComponent, ref, onMounted, onUnmounted } from 'vue';
+<script setup lang="ts">
+// import { defineComponent, ref, onMounted, onUnmounted } from 'vue';
+// import * as d3 from 'd3';
+
+import { ref, onMounted } from 'vue';
 import * as d3 from 'd3';
 
 interface GraphNode {
@@ -44,8 +29,6 @@ interface GraphNode {
   x?: number;
   y?: number;
 }
-
-type StratifyNode = GraphNode & { name: string, parent: string }
 
 interface GraphLink {
   source: string | GraphNode;
@@ -64,389 +47,361 @@ interface NodeData {
   children: NodeData[];
 }
 
-interface ApiResponse {
-  data: NodeData[];
-}
+const graphContainer = ref<HTMLDivElement | null>(null);
+const graphApiUrl = import.meta.env.VITE_GRAPH_API_URL || ''
+// UI state
+const loading = ref(false);
+const apiStatus = ref('');
+const error = ref('');
 
-export default defineComponent({
-  name: 'App',
-  setup() {
-    // Graph container ref
-    const graphContainer = ref<HTMLDivElement | null>(null);
+// Popup state
+const selectedNode = ref<GraphNode | null>(null);
+const showPopup = ref(false);
+const popupStyle = ref({
+  top: '0px',
+  left: '0px'
+});
 
-    // Read API URLs from environment variables with fallback values
-    const graphApiUrl = 'https://ciqe0d8uig.execute-api.eu-west-1.amazonaws.com/prod/api/graph';
-    const healthApiUrl = 'https://ciqe0d8uig.execute-api.eu-west-1.amazonaws.com/prod/api/health';
+// D3 elements
+let svg: d3.Selection<SVGSVGElement, unknown, null, undefined> | null = null;
 
-    console.log('Using Graph API URL:', graphApiUrl);
-    console.log('Using Health API URL:', healthApiUrl);
+// Prepare data for D3 tree layout
+const prepareGraphData = (rootNodes: NodeData[]): GraphData => {
+  const nodes: GraphNode[] = [];
+  const links: GraphLink[] = [];
 
-    // UI state
-    const loading = ref(false);
-    const healthLoading = ref(false);
-    const apiStatus = ref('');
-    const error = ref('');
-
-    // Popup state
-    const selectedNode = ref<GraphNode | null>(null);
-    const showPopup = ref(false);
-    const popupStyle = ref({
-      top: '0px',
-      left: '0px'
-    });
-
-    // D3 elements
-    let svg: d3.Selection<SVGSVGElement, unknown, null, undefined> | null = null;
-
-    // Check API health
-    const checkHealth = async () => {
-      healthLoading.value = true;
-      apiStatus.value = '';
-      error.value = '';
-
-      try {
-        console.log('Calling health endpoint:', healthApiUrl);
-
-        const response = await fetch(healthApiUrl);
-        const data = await response.json();
-
-        console.log('Health endpoint response:', data);
-        apiStatus.value = data.status;
-      } catch (err) {
-        console.error('Error calling health endpoint:', err);
-        error.value = err instanceof Error ? err.message : 'Unknown error occurred';
-      } finally {
-        healthLoading.value = false;
-      }
+  // Function to recursively process nodes
+  const processNode = (node: NodeData, depth = 0): void => {
+    // Add the current node
+    const nodeObj: GraphNode = {
+      id: node.name,
+      name: node.name,
+      description: node.description,
+      parent: node.parent,
+      depth: depth
     };
+    nodes.push(nodeObj);
 
-    // Prepare data for D3 tree layout
-    const prepareGraphData = (rootNodes: NodeData[]): GraphData => {
-      const nodes: GraphNode[] = [];
-      const links: GraphLink[] = [];
-
-      // Function to recursively process nodes
-      const processNode = (node: NodeData, depth = 0): void => {
-        // Add the current node
-        const nodeObj: GraphNode = {
-          id: node.name,
-          name: node.name,
-          description: node.description,
-          parent: node.parent,
-          depth: depth
-        };
-        nodes.push(nodeObj);
-
-        // Process children and create links
-        if (node.children && node.children.length > 0) {
-          node.children.forEach(child => {
-            // Add link from parent to child
-            links.push({
-              source: node.name,
-              target: child.name
-            });
-
-            // Process the child recursively
-            processNode(child, depth + 1);
-          });
-        }
-      };
-
-      // Process each root node
-      rootNodes.forEach(rootNode => {
-        processNode(rootNode);
-      });
-
-      return { nodes, links };
-    };
-
-    const fetchGraphData = async (): Promise<void> => {
-      loading.value = true;
-      error.value = '';
-
-      try {
-        console.log('Fetching graph data from:', graphApiUrl);
-        const response = await fetch(graphApiUrl);
-        if (!response.ok) {
-          throw new Error(`API request failed with status ${response.status}`);
-        }
-        const { data } = await response.json();
-        console.log('Graph data response:', data);
-        const graphData = prepareGraphData(data);
-        // Ensure the SVG is initialized before rendering
-        initializeSVG();
-        renderHierarchicalGraph(graphData);
-      } catch (apiError) {
-        console.error('API Error:', apiError);
-        error.value = 'Could not fetch data from API. Using sample data instead.';
-        // Optionally, add fallback to sample data
-      } finally {
-        loading.value = false;
-      }
-    };
-
-    // Initialize SVG 
-    const initializeSVG = () => {
-      // Remove any existing SVG first
-      if (graphContainer.value) {
-        graphContainer.value.innerHTML = '';
-
-        // Set up SVG with responsive sizing
-        const width = graphContainer.value.clientWidth || 800;
-        const height = graphContainer.value.clientHeight || 600;
-
-        svg = d3.select(graphContainer.value)
-          .append('svg')
-          .attr('width', '100%')
-          .attr('height', '100%')
-          .attr('viewBox', `0 0 ${width} ${height}`)
-          .attr('preserveAspectRatio', 'xMidYMid meet');
-      }
-    };
-
-
-    const renderHierarchicalGraph = (graphData: GraphData): void => {
-      // Ensure SVG is initialized
-      if (!svg) return console.error('SVG not initialized');
-
-      // Just use the svg selection directly
-      const svgSelection = svg;
-
-      // Clear existing SVG content
-      svgSelection.selectAll("*").remove();
-
-      // Configuration options
-      const width = 800;
-      const height = 600;
-      const nodeWidth = 100;
-      const nodeHeight = 50;
-      const padding = 1.5;
-      const stroke = "#999";
-      const strokeWidth = 2;
-      const nodeGap = 10;
-
-      // Convert flat data to hierarchy format expected by Tree function
-      const hierarchyData = {
-        name: "root",
-        children: [] as any[],
-        description: '',
-        id: ''
-      };
-
-      // Find root node and build tree
-      const rootNode = graphData.nodes.find(n => !n.parent);
-      if (!rootNode) return console.error('No root node found');
-
-      // Build hierarchical data structure
-      hierarchyData.name = rootNode.name;
-      hierarchyData.description = rootNode.description;
-      hierarchyData.id = rootNode.id;
-
-      // Recursive function to build the tree
-      function buildChildren(parentName: string): any[] {
-        return graphData.nodes
-          .filter(node => node.parent === parentName)
-          .map(node => ({
-            name: node.name,
-            description: node.description,
-            id: node.id,
-            children: buildChildren(node.name)
-          }));
-      }
-
-      hierarchyData.children = buildChildren(rootNode.name);
-
-      // Create hierarchy and apply tree layout
-      const root = d3.hierarchy(hierarchyData);
-
-      // Compute the layout
-      const dy = width / (root.height + padding);
-      const dx = 40;
-
-      // Use d3.tree layout
-      d3.tree().nodeSize([dx, dy])(root as unknown as any);
-
-      // Center the tree
-      let x0 = Infinity;
-      let x1 = -x0;
-      root.each(d => {
-        if (d.x != null) {
-          x1 = Math.max(x1, d.x);
-          x0 = Math.min(x0, d.x);
-        }
-      });
-
-      // Apply viewBox and setup
-      svgSelection
-        .attr("viewBox", [-dy * padding / 2, x0 - dx, width, height])
-        .attr("width", width)
-        .attr("height", height);
-
-      // Add arrowhead marker
-      svgSelection
-        .append('defs').append('marker')
-        .attr('id', 'arrowhead')
-        .attr('viewBox', '0 -5 10 10')
-        .attr('refX', 8)
-        .attr('refY', 0)
-        .attr('orient', 'auto')
-        .attr('markerWidth', 6)
-        .attr('markerHeight', 6)
-        .append('path')
-        .attr('d', 'M0,-5L10,0L0,5')
-        .attr('fill', stroke);
-
-      // Special case for root node
-      if (root.children && root.children.length > 0) {
-        const rootY = root.y || 0;
-        const rootX = root.x || 0;
-        const verticalX = rootY + 100;
-
-        // Find min and max Y of children
-        const childrenXs = root.children.map(d => d.x || 0);
-        const minX = Math.min(...childrenXs);
-        const maxX = Math.max(...childrenXs);
-
-        // Create vertical connector
-        svgSelection
-          .append("line")
-          .attr("x1", verticalX)
-          .attr("y1", minX)
-          .attr("x2", verticalX)
-          .attr("y2", maxX)
-          .attr("stroke", stroke)
-          .attr("stroke-width", strokeWidth);
-
-        // Create horizontal line from root to vertical
-        svgSelection
-          .append("path")
-          .attr("d", `M${rootY},${rootX}L${verticalX},${rootX}`)
-          .attr("fill", "none")
-          .attr("stroke", stroke)
-          .attr("stroke-width", strokeWidth);
-
-        // Create lines from vertical to each child
-        svgSelection
-          .selectAll(".root-child-link")
-          .data(root.children)
-          .join("path")
-          .attr("class", "root-child-link")
-          .attr("d", d => {
-            const childY = d.y || 0;
-            const childX = d.x || 0;
-            const endY = childY - nodeWidth / 2 - nodeGap - 10;
-            return `M${verticalX},${childX}L${endY},${childX}`;
-          })
-          .attr("fill", "none")
-          .attr("stroke", stroke)
-          .attr("stroke-width", strokeWidth)
-          .attr("marker-end", "url(#arrowhead)");
-      }
-
-      // Draw links between non-root nodes
-      svgSelection
-        .append("g")
-        .attr("fill", "none")
-        .attr("stroke", stroke)
-        .attr("stroke-width", strokeWidth)
-        .selectAll("path")
-        .data(root.links().filter(d => d.source.depth > 0))
-        .join("path")
-        .attr("d", d => {
-          const sourceY = d.source.y || 0;
-          const sourceX = d.source.x || 0;
-          const targetY = d.target.y || 0;
-          const targetX = d.target.x || 0;
-          const endY = targetY - nodeWidth / 2 - nodeGap;
-          return `M${sourceY},${sourceX}L${endY},${targetX}`;
-        })
-        .attr("marker-end", "url(#arrowhead)");
-
-      // Draw nodes as rectangles
-      const node = svgSelection
-        .append("g")
-        .selectAll("g")
-        .data(root.descendants())
-        .join("g")
-        .attr("transform", d => `translate(${d.y},${d.x})`);
-
-      // Add rectangles
-      node.append("rect")
-        .attr("x", -nodeWidth / 2)
-        .attr("y", -nodeHeight / 2)
-        .attr("width", nodeWidth)
-        .attr("height", nodeHeight)
-        .attr("rx", 5)
-        .attr("ry", 5)
-        .attr("fill", d => colorByDepth(d.depth))
-        .attr("stroke", "#fff")
-        .attr("stroke-width", 2)
-        .on("click", (event, d) => {
-          // Get parent name
-          let parentName = "";
-          if (d.parent) {
-            parentName = d.parent.data.name || "";
-          }
-
-          selectedNode.value = {
-            name: d.data.name || "",
-            description: d.data.description || "",
-            parent: parentName,
-            id: d.data.id || d.data.name || "",
-            depth: d.depth
-          };
-
-          showPopup.value = true;
-          popupStyle.value = {
-            top: `${event.pageY}px`,
-            left: `${event.pageX + 10}px`
-          };
+    // Process children and create links
+    if (node.children && node.children.length > 0) {
+      node.children.forEach(child => {
+        // Add link from parent to child
+        links.push({
+          source: node.name,
+          target: child.name
         });
 
-      // Add labels
-      node.append("text")
-        .attr("dy", "0.32em")
-        .attr("text-anchor", "middle")
-        .attr("fill", "white")
-        .attr("font-weight", "bold")
-        .attr("pointer-events", "none")
-        .text(d => d.data.name);
-    };
+        // Process the child recursively
+        processNode(child, depth + 1);
+      });
+    }
+  };
 
-    // Helper function to generate colors based on node depth
-    const colorByDepth = (depth: number): string => {
-      const colors = [
-        '#4CAF50', // Green for root
-        '#2196F3', // Blue
-        '#FFC107', // Amber
-        '#9C27B0', // Purple
-        '#FF5722'  // Deep Orange
-      ];
-      return colors[depth % colors.length];
-    };
+  // Process each root node
+  rootNodes.forEach(rootNode => {
+    processNode(rootNode);
+  });
 
-    // Load initial graph data
-    onMounted(() => {
-      fetchGraphData();
+  return { nodes, links };
+};
+
+const fetchGraphData = async (): Promise<void> => {
+  loading.value = true;
+  error.value = '';
+
+  try {
+    console.log('graphApiUrl-->', graphApiUrl);
+    const response = await fetch(graphApiUrl);
+    if (!response.ok) {
+      throw new Error(`API request failed with status ${response.status}`);
+    }
+    const { data } = await response.json();
+    console.log('Graph data response:', data);
+    const graphData = prepareGraphData(data);
+    // Ensure the SVG is initialized before rendering
+    initializeSVG();
+    renderHierarchicalGraph(graphData);
+  } catch (apiError) {
+    console.error('API Error:', apiError);
+    error.value = 'Could not fetch data from API';
+    // Optionally, add fallback to sample data
+  } finally {
+    loading.value = false;
+  }
+};
+
+const initializeSVG = () => {
+  // Remove any existing SVG first
+  if (graphContainer.value) {
+    graphContainer.value.innerHTML = '';
+
+    // Set up SVG with responsive sizing
+    const width = graphContainer.value.clientWidth || 800;
+    const height = graphContainer.value.clientHeight || 600;
+
+    svg = d3.select(graphContainer.value)
+      .append('svg')
+      .attr('width', '100%')
+      .attr('height', '100%')
+      .attr('viewBox', `0 0 ${width} ${height}`)
+      .attr('preserveAspectRatio', 'xMidYMid meet');
+  }
+};
+
+
+const renderHierarchicalGraph = (graphData: GraphData): void => {
+  // Ensure SVG is initialized
+  if (!svg) return console.error('SVG not initialized');
+
+  // Just use the svg selection directly
+  const svgSelection = svg;
+
+  // Clear existing SVG content
+  svgSelection.selectAll("*").remove();
+
+  // Configuration options
+  const width = 800;
+  const height = 600;
+  const nodeWidth = 100;
+  const nodeHeight = 50;
+  const padding = 1.5;
+  const stroke = "#999";
+  const strokeWidth = 2;
+  const nodeGap = 10;
+
+  // Convert flat data to hierarchy format expected by Tree function
+  const hierarchyData = {
+    name: "root",
+    children: [] as any[],
+    description: '',
+    id: ''
+  };
+
+  // Find root node and build tree
+  const rootNode = graphData.nodes.find(n => !n.parent);
+  if (!rootNode) return console.error('No root node found');
+
+  // Build hierarchical data structure
+  hierarchyData.name = rootNode.name;
+  hierarchyData.description = rootNode.description;
+  hierarchyData.id = rootNode.id;
+
+  // Recursive function to build the tree
+  function buildChildren(parentName: string): any[] {
+    return graphData.nodes
+      .filter(node => node.parent === parentName)
+      .map(node => ({
+        name: node.name,
+        description: node.description,
+        id: node.id,
+        children: buildChildren(node.name)
+      }));
+  }
+
+  hierarchyData.children = buildChildren(rootNode.name);
+
+  // Create hierarchy and apply tree layout
+  const root = d3.hierarchy(hierarchyData);
+
+  // Compute the layout
+  const dy = width / (root.height + padding);
+  const dx = 40;
+
+  // Use d3.tree layout
+  d3.tree().nodeSize([dx, dy])(root as unknown as any);
+
+  // Center the tree
+  let x0 = Infinity;
+  let x1 = -x0;
+  root.each(d => {
+    if (d.x != null) {
+      x1 = Math.max(x1, d.x);
+      x0 = Math.min(x0, d.x);
+    }
+  });
+
+  // Apply viewBox and setup
+  svgSelection
+    .attr("viewBox", [-dy * padding / 2, x0 - dx, width, height])
+    .attr("width", "100%")
+    .attr("height", "100%")
+    .attr("preserveAspectRatio", "xMidYMid meet");
+
+  // Add arrowhead marker
+  svgSelection
+    .append('defs').append('marker')
+    .attr('id', 'arrowhead')
+    .attr('viewBox', '0 -5 10 10')
+    .attr('refX', 8)
+    .attr('refY', 0)
+    .attr('orient', 'auto')
+    .attr('markerWidth', 6)
+    .attr('markerHeight', 6)
+    .append('path')
+    .attr('d', 'M0,-5L10,0L0,5')
+    .attr('fill', stroke);
+
+  // Special case for root node
+  if (root.children && root.children.length > 0) {
+    const rootY = root.y || 0;
+    const rootX = root.x || 0;
+    const verticalX = rootY + 100;
+
+    // Find min and max Y of children
+    const childrenXs = root.children.map(d => d.x || 0);
+    const minX = Math.min(...childrenXs);
+    const maxX = Math.max(...childrenXs);
+
+    // Create vertical connector
+    svgSelection
+      .append("line")
+      .attr("x1", verticalX)
+      .attr("y1", minX)
+      .attr("x2", verticalX)
+      .attr("y2", maxX)
+      .attr("stroke", stroke)
+      .attr("stroke-width", strokeWidth);
+
+    // Create horizontal line from root to vertical
+    svgSelection
+      .append("path")
+      .attr("d", `M${rootY},${rootX}L${verticalX},${rootX}`)
+      .attr("fill", "none")
+      .attr("stroke", stroke)
+      .attr("stroke-width", strokeWidth);
+
+    // Create lines from vertical to each child
+    svgSelection
+      .selectAll(".root-child-link")
+      .data(root.children)
+      .join("path")
+      .attr("class", "root-child-link")
+      .attr("d", d => {
+        const childY = d.y || 0;
+        const childX = d.x || 0;
+        const endY = childY - nodeWidth / 2 - nodeGap - 10;
+        return `M${verticalX},${childX}L${endY},${childX}`;
+      })
+      .attr("fill", "none")
+      .attr("stroke", stroke)
+      .attr("stroke-width", strokeWidth)
+      .attr("marker-end", "url(#arrowhead)");
+  }
+
+  // Draw links between non-root nodes
+  svgSelection
+    .append("g")
+    .attr("fill", "none")
+    .attr("stroke", stroke)
+    .attr("stroke-width", strokeWidth)
+    .selectAll("path")
+    .data(root.links().filter(d => d.source.depth > 0))
+    .join("path")
+    .attr("d", d => {
+      const sourceY = d.source.y || 0;
+      const sourceX = d.source.x || 0;
+      const targetY = d.target.y || 0;
+      const targetX = d.target.x || 0;
+      const endY = targetY - nodeWidth / 2 - nodeGap;
+      return `M${sourceY},${sourceX}L${endY},${targetX}`;
+    })
+    .attr("marker-end", "url(#arrowhead)");
+
+  // Draw nodes as rectangles
+  const node = svgSelection
+    .append("g")
+    .selectAll("g")
+    .data(root.descendants())
+    .join("g")
+    .attr("transform", d => `translate(${d.y},${d.x})`);
+
+  // Add rectangles
+  node.append("rect")
+    .attr("x", -nodeWidth / 2)
+    .attr("y", -nodeHeight / 2)
+    .attr("width", nodeWidth)
+    .attr("height", nodeHeight)
+    .attr("rx", 5)
+    .attr("ry", 5)
+    .attr("fill", d => colorByDepth(d.depth))
+    .attr("stroke", "#fff")
+    .attr("stroke-width", 2)
+    .on("click", (event, d) => {
+      // Get parent name
+      let parentName = "";
+      if (d.parent) {
+        parentName = d.parent.data.name || "";
+      }
+
+      selectedNode.value = {
+        name: d.data.name || "",
+        description: d.data.description || "",
+        parent: parentName,
+        id: d.data.id || d.data.name || "",
+        depth: d.depth
+      };
+
+      showPopup.value = true;
+      popupStyle.value = {
+        top: `${event.pageY}px`,
+        left: `${event.pageX + 10}px`
+      };
     });
 
-    return {
-      graphContainer,
-      fetchGraphData,
-      checkHealth,
-      loading,
-      healthLoading,
-      apiStatus,
-      error,
-      selectedNode,
-      showPopup,
-      popupStyle
-    };
-  }
+  // Add labels
+  node.append("text")
+    .attr("dy", "0.32em")
+    .attr("text-anchor", "middle")
+    .attr("fill", "white")
+    .attr("font-weight", "bold")
+    .attr("pointer-events", "none")
+    .text(d => d.data.name);
+};
+const colorByDepth = (depth: number): string => {
+  const colors = [
+    '#4CAF50', // Green for root
+    '#2196F3', // Blue
+    '#FFC107', // Amber
+    '#9C27B0', // Purple
+    '#FF5722'  // Deep Orange
+  ];
+  return colors[depth % colors.length];
+};
+// Load initial graph data
+onMounted(() => {
+  fetchGraphData();
 });
 </script>
 
-<style>
+<script lang="ts">
+export default {
+  name: 'App'
+}
+</script>
+
+<style scoped>
+.graph-container {
+  width: 100%;
+  height: 600px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.node-popup {
+  position: absolute;
+  background: white;
+  border: 1px solid #ccc;
+  padding: 10px;
+  border-radius: 4px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+}
+
+.error {
+  color: red;
+  margin: 10px 0;
+}
+
 .container {
   max-width: 1200px;
   margin: 0 auto;

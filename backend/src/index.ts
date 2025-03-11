@@ -104,7 +104,6 @@ const initializeNeptune = async (): Promise<void> => {
            .V().has('node', 'name', '${node.name}').as('child')
            .addE('parent_of').from('parent').to('child')`
         );
-        console.log(`Added edge from ${node.parent} to ${node.name}`);
       } catch (error) {
         console.error(`Error adding edge from ${node.parent} to ${node.name}:`, error);
         throw error;
