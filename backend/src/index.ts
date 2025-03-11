@@ -32,14 +32,12 @@ let isNeptuneInitialized = false;
 
 // Add a function to clear the database
 const clearNeptuneDatabase = async (): Promise<void> => {
-  console.log('Clearing Neptune database...');
   let client = null;
   try {
     client = createGremlinClient();
     await client.open();
     // Drop all vertices and edges
     await client.submit('g.V().drop()');
-    console.log('Database cleared successfully');
   } catch (error) {
     console.error('Error clearing Neptune database:', error);
     throw error;
@@ -51,10 +49,8 @@ const clearNeptuneDatabase = async (): Promise<void> => {
 };
 
 const initializeNeptune = async (): Promise<void> => {
-  console.log('inside initializeNeptune......')
   // If already initialized, skip
   if (isNeptuneInitialized) {
-    console.log('already initialised.....')
     return
   };
   let client = null;
@@ -138,9 +134,7 @@ const initializeNeptune = async (): Promise<void> => {
 // Get graph data
 const getGraphData = async () => {
   // Ensure Neptune is initialized before fetching data
-  console.log("inside getGraphData")
   if (!isNeptuneInitialized && process.env.NEPTUNE_ENDPOINT) {
-    console.log('about to initialise...')
     await initializeNeptune();
   }
 
@@ -196,10 +190,6 @@ const getGraphData = async () => {
         parentNode.children.push(childNode);
       }
     });
-    console.log("nodesMap.values()--> ", JSON.stringify(nodesMap.values()))
-    // Find root nodes
-    // const rootNodes = Array.from(nodesMap.values())
-    //   .filter(node => !node.parent);
     let rootNodes = Array.from(nodesMap.values())
       .filter(node => !node.parent);
 
@@ -234,7 +224,6 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     switch (event.path) {
       case '/api/graph':
         const data = await getGraphData();
-        console.log("data from be -->", JSON.stringify(data))
         return {
           statusCode: 200,
           headers: {
@@ -243,17 +232,6 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
           },
           body: JSON.stringify({ data })
         };
-
-      case '/api/health':
-        return {
-          statusCode: 200,
-          body: JSON.stringify({ status: 'ok' }),
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*'
-          },
-        };
-
       default:
         return {
           statusCode: 404,

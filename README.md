@@ -92,6 +92,16 @@ This creates a production build in the `dist` directory.
 
 The frontend is automatically deployed to an S3 bucket by the CDK deployment.
 
+ ## Testing
+
+This project uses Vitest for unit testing. The tests cover component rendering, data fetching, and user interactions with the graph visualization.
+
+### Running Tests
+
+To run all tests:
+```bash
+npm run test
+```
 ## Architecture
 
 - **Frontend**: Vue.js + D3.js (hosted on S3)
