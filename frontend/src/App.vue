@@ -1,24 +1,28 @@
 <template>
   <div>
+    <h1 class="header">Graph Data Visualization</h1>
+    <!-- Loading overlay -->
+    <div v-if="loading" class="loading-overlay">
+      <div class="loader"></div>
+      <p>Loading graph data...</p>
+    </div>
     <div ref="graphContainer" class="graph-container"></div>
     <div v-if="error" class="error">{{ error }}</div>
 
     <!-- Node popup -->
     <div v-if="showPopup" class="node-popup" :style="popupStyle">
+      <button class="close-button" @click="showPopup = false">×</button>
       <h3>{{ selectedNode?.name }}</h3>
       <p>{{ selectedNode?.description }}</p>
       <p>Parent: {{ selectedNode?.parent || 'None' }}</p>
-      <button @click="showPopup = false">Close</button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-// import { defineComponent, ref, onMounted, onUnmounted } from 'vue';
-// import * as d3 from 'd3';
-
 import { ref, onMounted } from 'vue';
 import * as d3 from 'd3';
+import axios from 'axios';
 
 interface GraphNode {
   id: string;
@@ -113,14 +117,9 @@ const fetchGraphData = async (): Promise<void> => {
 
   try {
     const graphApiUrl = `https://${apiGatewayId}.execute-api.${awsRegion}.amazonaws.com/${environment}/api/graph`
-    console.log('graphApiUrl-->', graphApiUrl);
-    const response = await fetch(graphApiUrl);
-    if (!response.ok) {
-      throw new Error(`API request failed with status ${response.status}`);
-    }
-    const { data } = await response.json();
-    console.log('Graph data response:', data);
-    const graphData = prepareGraphData(data);
+    const { data: graphApiResponse } = await axios.get(graphApiUrl);
+    console.log('Graph data response:', JSON.stringify(graphApiResponse));
+    const graphData = prepareGraphData(graphApiResponse.data);
     // Ensure the SVG is initialized before rendering
     initializeSVG();
     renderHierarchicalGraph(graphData);
@@ -518,5 +517,34 @@ button:disabled {
 
 .popup-body p {
   margin: 0 0 8px 0;
+}
+
+.loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.8);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+}
+
+.loader {
+  border: 5px solid #f3f3f3;
+  border-top: 5px solid #3498db;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  animation: spin 1s linear infinite;
+  margin-bottom: 15px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 </style>
