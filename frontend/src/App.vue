@@ -48,10 +48,12 @@ interface NodeData {
 }
 
 const graphContainer = ref<HTMLDivElement | null>(null);
-const graphApiUrl = import.meta.env.VITE_GRAPH_API_URL || ''
+const apiGatewayId = import.meta.env.VITE_API_GATEWAY_ID || ''
+const awsRegion = import.meta.env.VITE_AWS_REGION || 'eu-west-1'
+const environment = import.meta.env.VITE_ENVIRONMENT || 'prod'
+
 // UI state
 const loading = ref(false);
-const apiStatus = ref('');
 const error = ref('');
 
 // Popup state
@@ -110,6 +112,7 @@ const fetchGraphData = async (): Promise<void> => {
   error.value = '';
 
   try {
+    const graphApiUrl = `https://${apiGatewayId}.execute-api.${awsRegion}.amazonaws.com/${environment}/api/graph`
     console.log('graphApiUrl-->', graphApiUrl);
     const response = await fetch(graphApiUrl);
     if (!response.ok) {
