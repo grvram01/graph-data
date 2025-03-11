@@ -15,15 +15,16 @@
     "types": ["vite/client"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
-    }
+      "@/*": ["./src/*"]
+    },
   },
   "include": [
     "src/**/*.ts", 
     "src/**/*.d.ts", 
     "src/**/*.tsx", 
     "src/**/*.vue", 
-    "env.d.ts"
+    "env.d.ts",
+    "tests/**/*.ts"
   ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

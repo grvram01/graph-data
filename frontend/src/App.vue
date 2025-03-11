@@ -20,7 +20,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, nextTick } from 'vue';
 import * as d3 from 'd3';
 import axios from 'axios';
 
@@ -57,8 +57,43 @@ const awsRegion = import.meta.env.VITE_AWS_REGION || 'eu-west-1'
 const environment = import.meta.env.VITE_ENVIRONMENT || 'prod'
 
 // UI state
-const loading = ref(false);
+const loading = ref(true);
 const error = ref('');
+
+const setSelectedNode = (node: GraphNode | null) => {
+  selectedNode.value = node;
+  return nextTick(); // Return promise that resolves after DOM update
+};
+
+const setShowPopup = (show: boolean) => {
+  showPopup.value = show;
+  return nextTick();
+};
+
+const setPopupStyle = (style: any) => {
+  popupStyle.value = style;
+  return nextTick();
+};
+
+const showNodePopup = async (node: GraphNode) => {
+  selectedNode.value = node;
+  showPopup.value = true;
+  await nextTick();
+};
+const closePopup = () => {
+  showPopup.value = false;
+  return nextTick();
+};
+
+// Expose methods for testing
+defineExpose({
+  setSelectedNode,
+  setShowPopup,
+  setPopupStyle,
+  closePopup,
+  showNodePopup,
+  loading
+});
 
 // Popup state
 const selectedNode = ref<GraphNode | null>(null);
@@ -501,6 +536,9 @@ button:disabled {
 }
 
 .close-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
   background: none;
   border: none;
   font-size: 20px;
@@ -542,7 +580,12 @@ button:disabled {
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
 }
 </style>
