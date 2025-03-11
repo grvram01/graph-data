@@ -9,6 +9,6 @@ lib/
 cdk.out
 
 # Environment Variables
-# .env
+.env
 # CDK context
 cdk.context.json
