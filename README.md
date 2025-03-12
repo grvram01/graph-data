@@ -132,3 +132,7 @@ If you see errors about missing modules like 'gremlin':
 1. Navigate to the frontend URL (S3 website URL in production)
 2. The graph will automatically load and display your hierarchical data
 3. Click on nodes to view details in a popup
+
+## Visualization Examples
+   Below is a screenshot of the Graph Data Visualization app in action:
+![Graph Visualization Example](./image.png)
