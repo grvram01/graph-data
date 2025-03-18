@@ -3,7 +3,6 @@ node_modules
 
 # Build Output
 dist
-lib/
 
 # CDK Output
 cdk.out
