@@ -34,23 +34,6 @@ interface GraphNode {
   y?: number;
 }
 
-interface GraphLink {
-  source: string | GraphNode;
-  target: string | GraphNode;
-}
-
-interface GraphData {
-  nodes: GraphNode[];
-  links: GraphLink[];
-}
-
-interface NodeData {
-  name: string;
-  description: string;
-  parent: string;
-  children: NodeData[];
-}
-
 const graphContainer = ref<HTMLDivElement | null>(null);
 const apiGatewayId = import.meta.env.VITE_API_GATEWAY_ID || ''
 const awsRegion = import.meta.env.VITE_AWS_REGION || 'eu-west-1'
@@ -106,46 +89,6 @@ const popupStyle = ref({
 // D3 elements
 let svg: d3.Selection<SVGSVGElement, unknown, null, undefined> | null = null;
 
-// Prepare data for D3 tree layout
-const prepareGraphData = (rootNodes: NodeData[]): GraphData => {
-  const nodes: GraphNode[] = [];
-  const links: GraphLink[] = [];
-
-  // Function to recursively process nodes
-  const processNode = (node: NodeData, depth = 0): void => {
-    // Add the current node
-    const nodeObj: GraphNode = {
-      id: node.name,
-      name: node.name,
-      description: node.description,
-      parent: node.parent,
-      depth: depth
-    };
-    nodes.push(nodeObj);
-
-    // Process children and create links
-    if (node.children && node.children.length > 0) {
-      node.children.forEach(child => {
-        // Add link from parent to child
-        links.push({
-          source: node.name,
-          target: child.name
-        });
-
-        // Process the child recursively
-        processNode(child, depth + 1);
-      });
-    }
-  };
-
-  // Process each root node
-  rootNodes.forEach(rootNode => {
-    processNode(rootNode);
-  });
-
-  return { nodes, links };
-};
-
 const fetchGraphData = async (): Promise<void> => {
   loading.value = true;
   error.value = '';
@@ -154,10 +97,9 @@ const fetchGraphData = async (): Promise<void> => {
     const graphApiUrl = `https://${apiGatewayId}.execute-api.${awsRegion}.amazonaws.com/${environment}/api/graph`
     const { data: graphApiResponse } = await axios.get(graphApiUrl);
     console.log('Graph data response:', JSON.stringify(graphApiResponse));
-    const graphData = prepareGraphData(graphApiResponse.data);
     // Ensure the SVG is initialized before rendering
     initializeSVG();
-    renderHierarchicalGraph(graphData);
+    renderHierarchicalGraph(graphApiResponse.data[0]);
   } catch (apiError) {
     console.error('API Error:', apiError);
     error.value = 'Could not fetch data from API';
@@ -184,7 +126,7 @@ const initializeSVG = () => {
 };
 
 
-const renderHierarchicalGraph = (graphData: GraphData): void => {
+const renderHierarchicalGraph = (graphData: any): void => {
   // Ensure SVG is initialized
   if (!svg) return console.error('SVG not initialized');
 
@@ -204,39 +146,8 @@ const renderHierarchicalGraph = (graphData: GraphData): void => {
   const strokeWidth = 2;
   const nodeGap = 10;
 
-  // Convert flat data to hierarchy format expected by Tree function
-  const hierarchyData = {
-    name: "root",
-    children: [] as any[],
-    description: '',
-    id: ''
-  };
-
-  // Find root node and build tree
-  const rootNode = graphData.nodes.find(n => !n.parent);
-  if (!rootNode) return console.error('No root node found');
-
-  // Build hierarchical data structure
-  hierarchyData.name = rootNode.name;
-  hierarchyData.description = rootNode.description;
-  hierarchyData.id = rootNode.id;
-
-  // Recursive function to build the tree
-  function buildChildren(parentName: string): any[] {
-    return graphData.nodes
-      .filter(node => node.parent === parentName)
-      .map(node => ({
-        name: node.name,
-        description: node.description,
-        id: node.id,
-        children: buildChildren(node.name)
-      }));
-  }
-
-  hierarchyData.children = buildChildren(rootNode.name);
-
   // Create hierarchy and apply tree layout
-  const root = d3.hierarchy(hierarchyData);
+  const root = d3.hierarchy(graphData);
 
   // Compute the layout
   const dy = width / (root.height + padding);
